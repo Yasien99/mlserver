@@ -4,4 +4,4 @@ torch==2.2.0
 torchvision==0.18.0
 pillow==8.4.0
 requests==2.31.0
-numpy==1.21.4
+numpy==1.22.0
