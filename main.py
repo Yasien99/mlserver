@@ -50,7 +50,7 @@ def preprocess_image(image: Image.Image):
     image = image.unsqueeze(0)
     return image
 
-def perform_ocr_on_cropped_image(image: Image.Image):
+def perform_ocr_on_claim(image: Image.Image):
     # Convert PIL image to OpenCV format
     image = np.array(image)
     image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
@@ -67,6 +67,41 @@ def perform_ocr_on_cropped_image(image: Image.Image):
 
     # Extract the numbers matching the regular expression
     number_pattern = re.compile(r'^\d+$')
+    extracted_numbers = [text for (bbox, text, prob) in results if number_pattern.match(text)]
+
+    return extracted_numbers
+
+def perform_ocr_on_full_approval(image: Image.Image):
+    # Convert PIL image to OpenCV format
+    image = np.array(image)
+    image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
+
+    # Perform OCR on the cropped image
+    results = reader.readtext(image)
+
+    # Extract the numbers matching the regular expression
+    number_pattern = re.compile(r'^\d{6,}$')
+    extracted_numbers = [text for (bbox, text, prob) in results if number_pattern.match(text)]
+
+    return extracted_numbers
+
+def perform_ocr_on_crop_approval(image: Image.Image):
+    # Convert PIL image to OpenCV format
+    image = np.array(image)
+    image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
+
+    # Resize the image to 600x600 pixels
+    resized_image = cv2.resize(image, (1000, 1000))
+
+    # Select the ROI manually (adjust coordinates as needed)
+    x, y, w, h = 0, 280, 1000, 100
+    roi = resized_image[y:y+h, x:x+w]
+
+    # Perform OCR on the cropped image
+    results = reader.readtext(roi)
+
+    # Extract the numbers matching the regular expression
+    number_pattern = re.compile(r'^\d{6,}$')
     extracted_numbers = [text for (bbox, text, prob) in results if number_pattern.match(text)]
 
     return extracted_numbers
@@ -88,22 +123,34 @@ async def predict(images: ImageURLs):
             with torch.no_grad():
                 output = model(image)
                 probability = output.item()
-                image_class = "Approval" if probability > 0.5 else "Claim"
+                image_class = "approval" if probability > 0.5 else "claim"
                 
-                if image_class == "Claim":
-                    # Perform OCR if the image is classified as "Approval"
+                if image_class == "claim":
                     original_image = Image.open(BytesIO(response.content)).convert("RGB")
-                    extracted_numbers = perform_ocr_on_cropped_image(original_image)
-                    ocr_result = ", ".join(extracted_numbers)
-                else:
-                    ocr_result = "N/A"
+                    extracted_numbers = perform_ocr_on_claim(original_image)
+                    prescription_code = ", ".join(extracted_numbers)
+                    results.append({
+                        "url": url,
+                        "class": image_class,
+                        "probability": probability,
+                        "prescription_code ": prescription_code
+                    })                    
 
-            results.append({
-                "url": url,
-                "class": image_class,
-                "probability": probability,
-                "ocr_result": ocr_result
-            })
+                elif image_class == "approval":
+                    original_image = Image.open(BytesIO(response.content)).convert("RGB")
+                    extracted_numbers = perform_ocr_on_crop_approval(original_image)
+                    card_number = extracted_numbers[0] if extracted_numbers else ""
+
+                    extracted_numbers = perform_ocr_on_full_approval(original_image)
+                    approval_number = extracted_numbers[0] if extracted_numbers else ""
+
+                    results.append({
+                        "url": url,
+                        "class": image_class,
+                        "probability": probability,
+                        "approval_number": approval_number,
+                        "card_number": card_number
+                    })
         else:
             results.append({
                 "url": url,
