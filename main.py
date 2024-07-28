@@ -3,6 +3,7 @@ from inspect import iscoroutinefunction
 from functools import wraps, partial
 from pydantic import BaseModel
 from fastapi import FastAPI
+from torch import optim
 from io import BytesIO
 import torch.nn as nn
 from PIL import Image
@@ -66,8 +67,8 @@ class EfficientNetBinary(nn.Module):
         super(EfficientNetBinary, self).__init__()
         self.base_model = models.efficientnet_b2(pretrained=True)
         self.base_model.classifier = nn.Sequential(
-            nn.Linear(self.base_model.classifier[1].in_features, 1),
-            nn.Sigmoid()
+            nn.Linear(self.base_model.classifier[1].in_features, 3),
+            nn.Softmax(dim=1)  # Use Softmax for multi-class classification
         )
 
     def forward(self, x):
@@ -75,9 +76,15 @@ class EfficientNetBinary(nn.Module):
 
 # Initialize the model
 model = EfficientNetBinary()
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 model.to(device)
-model.load_state_dict(torch.load('efficientnet_model.pth', map_location=device))
+optimizer = optim.Adam(model.parameters(), lr=0.001, weight_decay=0.01)  # Weight decay for L2 regularization
+checkpoint = torch.load('best_model_EffcientNet.pth',  map_location=device)
+model.load_state_dict(checkpoint['model_state_dict'])
+optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+epoch = checkpoint['epochs']
+model.class_to_idx = checkpoint['class_to_idx']
+model.idx_to_class = checkpoint['idx_to_class']
 model.eval()
 
 # Initialize EasyOCR Reader
@@ -178,21 +185,26 @@ async def predict(images: ImageURLs):
             
             with torch.no_grad():
                 output = model(image)
-                probability = output.item()
-                image_class = "approval" if probability > 0.5 else "claim"
-                
-                if image_class == "claim":
+                probability = torch.exp(output)
+                topk, topclass = probability.topk(3, dim=1)
+
+                # Extract the actual classes and probabilities
+                top_classes = [
+                    model.idx_to_class[class_] for class_ in topclass.cpu().numpy()[0]
+                ]
+                image_class = top_classes[0]
+                if image_class == "Claims":
                     original_image = Image.open(BytesIO(response.content)).convert("RGB")
                     extracted_numbers = perform_ocr_on_claim(original_image)
                     prescription_code = ", ".join(extracted_numbers)
                     results.append({
                         "url": url,
                         "class": image_class,
-                        "probability": probability,
+                        # "probability": probability,
                         "prescription_code ": prescription_code
                     })                    
 
-                elif image_class == "approval":
+                elif image_class == "Approval":
                     original_image = Image.open(BytesIO(response.content)).convert("RGB")
                     extracted_numbers = perform_ocr_on_crop_approval_card_number(original_image)
                     card_number = extracted_numbers[0] if extracted_numbers else ""
@@ -203,9 +215,15 @@ async def predict(images: ImageURLs):
                     results.append({
                         "url": url,
                         "class": image_class,
-                        "probability": probability,
+                        # "probability": probability,
                         "approval_number": approval_number,
                         "card_number": card_number
+                    })
+                elif image_class == "Receipt":
+                    results.append({
+                        "url": url,
+                        "class": image_class,
+                        # "probability": probability,
                     })
         else:
             results.append({
