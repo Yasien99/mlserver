@@ -185,14 +185,19 @@ async def predict(images: ImageURLs):
             
             with torch.no_grad():
                 output = model(image)
-                probability = torch.exp(output)
-                topk, topclass = probability.topk(3, dim=1)
+
+                topk, topclass = output.topk(3, dim=1)
 
                 # Extract the actual classes and probabilities
                 top_classes = [
                     model.idx_to_class[class_] for class_ in topclass.cpu().numpy()[0]
                 ]
                 image_class = top_classes[0]
+
+                top_p = topk.cpu().numpy()[0]
+                probability = str(top_p[0])
+
+                # Print the top class probability and its label
                 if image_class == "Claims":
                     original_image = Image.open(BytesIO(response.content)).convert("RGB")
                     extracted_numbers = perform_ocr_on_claim(original_image)
@@ -200,7 +205,7 @@ async def predict(images: ImageURLs):
                     results.append({
                         "url": url,
                         "class": image_class,
-                        # "probability": probability,
+                        "probability": probability,
                         "prescription_code ": prescription_code
                     })                    
 
@@ -215,7 +220,7 @@ async def predict(images: ImageURLs):
                     results.append({
                         "url": url,
                         "class": image_class,
-                        # "probability": probability,
+                        "probability": probability,
                         "approval_number": approval_number,
                         "card_number": card_number
                     })
@@ -223,7 +228,7 @@ async def predict(images: ImageURLs):
                     results.append({
                         "url": url,
                         "class": image_class,
-                        # "probability": probability,
+                        "probability": probability
                     })
         else:
             results.append({
