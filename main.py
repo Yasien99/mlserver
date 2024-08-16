@@ -67,7 +67,7 @@ class EfficientNetBinary(nn.Module):
         super(EfficientNetBinary, self).__init__()
         self.base_model = models.efficientnet_b2(pretrained=True)
         self.base_model.classifier = nn.Sequential(
-            nn.Linear(self.base_model.classifier[1].in_features, 3),
+            nn.Linear(self.base_model.classifier[1].in_features, 4),
             nn.Softmax(dim=1)  # Use Softmax for multi-class classification
         )
 
@@ -79,7 +79,7 @@ model = EfficientNetBinary()
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 model.to(device)
 optimizer = optim.Adam(model.parameters(), lr=0.001, weight_decay=0.01)  # Weight decay for L2 regularization
-checkpoint = torch.load('best_model_EffcientNet.pth',  map_location=device)
+checkpoint = torch.load('best_model_EffcientNet_4C.pth',  map_location=device)
 model.load_state_dict(checkpoint['model_state_dict'])
 optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
 epoch = checkpoint['epochs']
@@ -225,6 +225,12 @@ async def predict(images: ImageURLs):
                         "card_number": card_number
                     })
                 elif image_class == "Receipt":
+                    results.append({
+                        "url": url,
+                        "class": image_class,
+                        "probability": probability
+                    })
+                elif image_class == "Random":
                     results.append({
                         "url": url,
                         "class": image_class,
